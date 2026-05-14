@@ -1,0 +1,9 @@
+{
+  "general": {
+    "plan": {
+      "directory": ".gemini/plans",
+      "modelRouting": true
+    },
+    "approvalMode": "plan"
+  }
+}

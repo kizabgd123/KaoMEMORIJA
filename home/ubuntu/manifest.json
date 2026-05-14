@@ -1,0 +1,18 @@
+{
+  "project_name": "LegacyProject",
+  "description": "Manifest fajl generisan za legacy projekat.",
+  "entry_point": "main.py",
+  "scripts": {
+    "setup": "pip install -r requirements.txt",
+    "run": "python main.py",
+    "test": "pytest"
+  },
+  "dependencies": [
+    "requirements.txt"
+  ],
+  "file_types_to_analyze": [
+    ".py",
+    ".sh",
+    ".ipynb"
+  ]
+}

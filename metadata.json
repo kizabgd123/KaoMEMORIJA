@@ -1,0 +1,6 @@
+{
+  "name": "AI Workflow Orchestrator",
+  "description": "Dashboard for managing complex tasks, global memory state, and subagent validations.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
