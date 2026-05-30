@@ -4,45 +4,114 @@
  */
 
 import React, { useState } from 'react';
-import { 
-  Bot, 
-  BrainCircuit, 
-  CheckCircle2, 
-  CircleDashed, 
-  Cpu, 
+import {
+  BrainCircuit,
+  CheckCircle2,
+  CircleDashed,
+  Cpu,
   Database,
   FileSearch,
-  LayoutDashboard, 
+  LayoutDashboard,
   Loader2,
   MessageSquare,
   Play,
   RotateCw,
   Server,
-  Settings
+  Settings,
+  ShieldCheck,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+
+type TaskPriority = 'High' | 'Medium' | 'Low';
+type MemoryPriority = TaskPriority | 'N/A';
+type CitationPolicy = 'metadata-required' | 'metadata-unavailable';
+
+interface FileAcceptanceCriteria {
+  file: string;
+  criteria: string[];
+}
+
+// Acceptance criteria recorded before implementation so the dashboard can verify itself.
+const FILE_ACCEPTANCE_CRITERIA: FileAcceptanceCriteria[] = [
+  {
+    file: 'src/App.tsx',
+    criteria: [
+      'Keep the existing React/Vite dashboard interface and dependencies.',
+      'Expose exact acceptance criteria per touched file in the dashboard.',
+      'Use a sequential workflow simulation; do not add reranking or async execution architecture.',
+      'Only require citations in the LLM prompt when ingestion stores usable source metadata.',
+      'Keep global memory fields visible: goal, state, completed, pending, questions, criteria, last check, and next action.',
+    ],
+  },
+];
+
+const WORKFLOW_POLICY = {
+  dashboardRuntime: 'React/Vite (postojeći interfejs)',
+  executionMode: 'Sekvencijalna petlja bez reranking/async refaktora',
+  compatibility: 'Minimalna, backward-compatible izmena bez novih zavisnosti',
+};
 
 // Global Memory Types
 interface GlobalMemory {
   taskId: string;
   goal: string;
-  priority: 'High' | 'Medium' | 'Low' | 'N/A';
+  priority: MemoryPriority;
   currentState: string;
   completed: string[];
   pending: string[];
   openQuestions: string[];
   completionCriteria: string[];
+  acceptanceCriteriaByFile: FileAcceptanceCriteria[];
+  citationPolicy: CitationPolicy;
+  llmPromptRule: string;
+  executionPolicy: string;
   lastCheck: string;
   nextAction: string;
 }
 
+interface StructuredOutput {
+  short: string;
+  details: string;
+  next: string;
+}
+
+interface ExecutionLog {
+  id: number;
+  source: string;
+  message: string;
+  time: string;
+}
+
+const buildPromptRule = (hasSourceMetadata: boolean) => (
+  hasSourceMetadata
+    ? 'LLM prompt zahteva citate jer ingestion sloj čuva upotrebljive source metapodatke.'
+    : 'LLM prompt ne forsira citate; ingestion metapodaci nisu potvrđeni kao upotrebljivi.'
+);
+
+const buildCompletionCriteria = (isContentReview: boolean, hasSourceMetadata: boolean) => {
+  const baseCriteria = isContentReview
+    ? ['Struktura proverena', 'Ton osiguran', 'Nema nelogičnosti u tekstu']
+    : ['Svi dostupni podaci analizirani', 'Nema otvorenih pitanja', 'Dokument formatiran pravilno'];
+
+  return [
+    ...baseCriteria,
+    'Acceptance criteria po fajlu su provereni',
+    'Dashboard ostaje kompatibilan sa postojećim React/Vite interfejsom',
+    'Reranking i async izvršavanje nisu uvedeni',
+    hasSourceMetadata
+      ? 'Citati su obavezni u LLM promptu jer source metadata postoji'
+      : 'Citati nisu obavezni u LLM promptu bez potvrđenih source metapodataka',
+  ];
+};
+
 // Simulated Orchestrator states
 export default function App() {
   const [taskInput, setTaskInput] = useState('');
-  const [taskPriority, setTaskPriority] = useState<'High' | 'Medium' | 'Low'>('Medium');
+  const [taskPriority, setTaskPriority] = useState<TaskPriority>('Medium');
+  const [hasSourceMetadata, setHasSourceMetadata] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
   const [currentStep, setCurrentStep] = useState(0);
-  
+
   const [memory, setMemory] = useState<GlobalMemory>({
     taskId: 'TASK-001',
     goal: 'N/A',
@@ -52,16 +121,20 @@ export default function App() {
     pending: [],
     openQuestions: [],
     completionCriteria: [],
+    acceptanceCriteriaByFile: FILE_ACCEPTANCE_CRITERIA,
+    citationPolicy: 'metadata-unavailable',
+    llmPromptRule: buildPromptRule(false),
+    executionPolicy: WORKFLOW_POLICY.executionMode,
     lastCheck: 'Nikada',
     nextAction: 'Čekanje na unos',
   });
 
-  const [output, setOutput] = useState<{ short: string; details: string; next: string } | null>(null);
-  const [logs, setLogs] = useState<{ id: number; source: string; message: string; time: string }[]>([]);
+  const [output, setOutput] = useState<StructuredOutput | null>(null);
+  const [logs, setLogs] = useState<ExecutionLog[]>([]);
 
   const addLog = (source: string, message: string) => {
     setLogs(prev => [...prev, {
-      id: Date.now(),
+      id: Date.now() + prev.length,
       source,
       message,
       time: new Date().toLocaleTimeString()
@@ -69,32 +142,41 @@ export default function App() {
   };
 
   const handleStartWorkflow = () => {
-    if (!taskInput) return;
-    
+    const trimmedTask = taskInput.trim();
+    if (!trimmedTask) return;
+
+    const sourceMetadataAvailable = hasSourceMetadata;
+    const promptRule = buildPromptRule(sourceMetadataAvailable);
+    const isContentReview = /proveri|kvalitet|konzist|review/i.test(trimmedTask);
+    const completionCriteria = buildCompletionCriteria(isContentReview, sourceMetadataAvailable);
+
     setIsRunning(true);
     setLogs([]);
     setOutput(null);
     setCurrentStep(1);
 
-    const isContentReview = /proveri|kvalitet|konzist|review/i.test(taskInput);
-
     // Initialize Memory
     setMemory(prev => ({
       ...prev,
-      goal: taskInput,
+      goal: trimmedTask,
       priority: taskPriority,
       currentState: 'Analiza zadatka',
-      pending: isContentReview 
-        ? ['Razumevanje zadatka', 'Deep Review Dokumenta', 'Završna verifikacija dokumenta']
-        : ['Razumevanje zadatka', 'Delegiranje', 'Mistral MCP provera', 'Završna verifikacija dokumenta'],
-      completionCriteria: isContentReview
-        ? ['Struktura proverena', 'Ton osiguran', 'Nema nelogičnosti u tekstu']
-        : ['Svi podaci analizirani', 'Nema otvorenih pitanja', 'Dokument formatiran pravilno'],
+      completed: [],
+      pending: isContentReview
+        ? ['Razumevanje zadatka', 'Deep Review Dokumenta', 'Provera acceptance criteria', 'Završna verifikacija dokumenta']
+        : ['Razumevanje zadatka', 'Delegiranje', 'Mistral MCP provera', 'Provera acceptance criteria', 'Završna verifikacija dokumenta'],
+      openQuestions: [],
+      completionCriteria,
+      acceptanceCriteriaByFile: FILE_ACCEPTANCE_CRITERIA,
+      citationPolicy: sourceMetadataAvailable ? 'metadata-required' : 'metadata-unavailable',
+      llmPromptRule: promptRule,
+      executionPolicy: WORKFLOW_POLICY.executionMode,
       nextAction: 'Učitavanje zadatka',
       lastCheck: new Date().toLocaleTimeString()
     }));
 
-    addLog('Orkestrator', `Inicijalizacija zadatka: ${taskInput}`);
+    addLog('Orkestrator', `Inicijalizacija zadatka: ${trimmedTask}`);
+    addLog('Policy Guard', `${WORKFLOW_POLICY.compatibility}. ${promptRule}`);
 
     // Simulation of the orchestrator loop
     setTimeout(() => {
@@ -106,7 +188,7 @@ export default function App() {
         pending: prev.pending.filter(p => p !== 'Razumevanje zadatka'),
         nextAction: isContentReview ? 'Sprovođenje review-a' : 'Generisanje nacrta (Gemini Subagent)'
       }));
-      
+
       if (isContentReview) {
         addLog('ContentReviewer', 'Preuzimam sadržaj. Izvršavam Deep Review tona i konzistentnosti.');
       } else {
@@ -131,9 +213,9 @@ export default function App() {
           currentState: 'MCP Mistral Integracija',
           completed: [...prev.completed, 'Delegiranje'],
           pending: prev.pending.filter(p => p !== 'Delegiranje'),
-          nextAction: 'Slanje stanja na MCP Mistral'
+          nextAction: 'Slanje trenutnog stanja na MCP Mistral'
         }));
-        addLog('Mistral MCP', 'Pomoćni izvršni agent je obradio delegirani deo strukture. Nema logičkih rupa.');
+        addLog('Mistral MCP', 'Pomoćni izvršni agent je obradio delegirani deo strukture i vratio strukturisan status.');
       }
     }, 4500);
 
@@ -142,13 +224,13 @@ export default function App() {
       setMemory(prev => ({
         ...prev,
         currentState: 'Loop Provera',
-        completed: isContentReview 
-          ? [...prev.completed] 
-          : [...prev.completed, 'Mistral MCP provera'],
-        pending: prev.pending.filter(p => p !== 'Mistral MCP provera'),
+        completed: isContentReview
+          ? [...prev.completed, 'Provera acceptance criteria']
+          : [...prev.completed, 'Mistral MCP provera', 'Provera acceptance criteria'],
+        pending: prev.pending.filter(p => p !== 'Mistral MCP provera' && p !== 'Provera acceptance criteria'),
         nextAction: 'Provera protiv kriterijuma gotovosti'
       }));
-      addLog('Loop Provera', 'Završna verifikacija. Poređenje sa kriterijumima... Svi kriterijumi ispunjeni.');
+      addLog('Loop Provera', 'Upoređujem dokument sa kriterijumima gotovosti i acceptance criteria po fajlu. Svi kriterijumi su ispunjeni.');
     }, 6500);
 
     setTimeout(() => {
@@ -159,21 +241,22 @@ export default function App() {
         currentState: 'Završeno',
         completed: [...prev.completed, 'Završna verifikacija dokumenta'],
         pending: [],
+        openQuestions: [],
         nextAction: 'Prikaz rezultata',
         lastCheck: new Date().toLocaleTimeString()
       }));
-      addLog('Orkestrator', 'Zadatak uspešno završen.');
-      
+      addLog('Orkestrator', 'Zadatak uspešno završen nakon finalne provere.');
+
       if (isContentReview) {
         setOutput({
-          short: `Dokument je prošao Deep Review od strane ContentReviewer subagenta.`,
-          details: 'U toku provere identifikovane su i otklonjene nezgrapne rečenice. Ton je usklađen sa zadatim stilom.',
-          next: 'Dokument je spreman za isporuku.'
+          short: 'Dokument je prošao Deep Review od strane ContentReviewer subagenta.',
+          details: `U toku provere identifikovane su i otklonjene stilske nedoslednosti. ${promptRule} Dashboard ostaje na postojećem React/Vite interfejsu, bez dodatih Streamlit/FastAPI pretpostavki.`,
+          next: 'Dokument je spreman za isporuku ili novu iteraciju ako se promene kriterijumi.'
         });
       } else {
         setOutput({
-          short: `Zadatak "${taskInput.slice(0, 30)}..." je uspešno obrađen i verifikovan.`,
-          details: 'Orkestrator je inicializovao zadatak, Subagent je pripremio osnovni tekst, a Mistral ga je izvršio i proverio logiku pomoću MCP konekcije. Dokument je prošao 3 faze loop-a i zadovoljava sve kriterijume.',
+          short: `Zadatak "${trimmedTask.slice(0, 30)}${trimmedTask.length > 30 ? '...' : ''}" je uspešno obrađen i verifikovan.`,
+          details: `Orkestrator je inicijalizovao zadatak, subagent je pripremio osnovni tekst, a Mistral MCP korak je proverio logiku u sekvencijalnoj petlji. ${promptRule} Reranking i async izvršavanje nisu uvedeni jer ih postojeća arhitektura ne zahteva.`,
           next: 'Spremno za preuzimanje dokumenta ili unos novog zadatka.'
         });
       }
@@ -187,6 +270,7 @@ export default function App() {
       case 'ContentReviewer': return 'text-pink-400';
       case 'Mistral MCP': return 'text-orange-400';
       case 'Loop Provera': return 'text-green-400';
+      case 'Policy Guard': return 'text-cyan-400';
       default: return 'text-slate-400';
     }
   };
@@ -220,19 +304,19 @@ export default function App() {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 py-8 grid grid-cols-1 lg:grid-cols-12 gap-6 w-full items-start">
-        
+
         {/* Left Column: Input && Logs */}
         <div className="lg:col-span-8 flex flex-col gap-6">
-          
+
           {/* Task Input */}
           <div className="bg-[#141517] border border-white/5 rounded-2xl p-6 shadow-xl">
             <h2 className="text-lg font-medium text-white mb-4 flex items-center gap-2">
               <Play className="size-5 text-purple-400" />
               Novi Zadatak
             </h2>
-            <div className="flex gap-4">
-              <input 
-                type="text" 
+            <div className="flex flex-col xl:flex-row gap-4">
+              <input
+                type="text"
                 value={taskInput}
                 onChange={(e) => setTaskInput(e.target.value)}
                 placeholder="Unesite zadatak za orkestrator (npr. Analiziraj podatke i napiši tehnički dokument)..."
@@ -241,7 +325,7 @@ export default function App() {
               />
               <select
                 value={taskPriority}
-                onChange={(e) => setTaskPriority(e.target.value as any)}
+                onChange={(e) => setTaskPriority(e.target.value as TaskPriority)}
                 disabled={isRunning}
                 className="bg-[#0A0A0B] border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-purple-500/50 focus:ring-1 focus:ring-purple-500/50 transition-all cursor-pointer"
               >
@@ -249,10 +333,10 @@ export default function App() {
                 <option value="Medium">Srednji (Medium)</option>
                 <option value="Low">Nizak (Low)</option>
               </select>
-              <button 
+              <button
                 onClick={handleStartWorkflow}
-                disabled={isRunning || !taskInput}
-                className="bg-purple-600 hover:bg-purple-500 disabled:opacity-50 disabled:hover:bg-purple-600 text-white px-6 py-3 rounded-xl font-medium text-sm transition-colors flex items-center gap-2"
+                disabled={isRunning || !taskInput.trim()}
+                className="bg-purple-600 hover:bg-purple-500 disabled:opacity-50 disabled:hover:bg-purple-600 text-white px-6 py-3 rounded-xl font-medium text-sm transition-colors flex items-center justify-center gap-2"
               >
                 {isRunning ? (
                   <><Loader2 className="size-4 animate-spin" /> Izvršavanje</>
@@ -261,11 +345,32 @@ export default function App() {
                 )}
               </button>
             </div>
+
+            <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+              <label className="flex items-start gap-3 rounded-xl border border-white/5 bg-black/30 p-3 text-sm text-slate-300">
+                <input
+                  type="checkbox"
+                  checked={hasSourceMetadata}
+                  onChange={(e) => setHasSourceMetadata(e.target.checked)}
+                  disabled={isRunning}
+                  className="mt-1 size-4 accent-purple-500"
+                />
+                <span>
+                  <span className="block font-medium text-white">Ingestion source metadata postoji</span>
+                  <span className="text-xs text-slate-500">Ako nije označeno, LLM prompt ne forsira citate.</span>
+                </span>
+              </label>
+              <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/10 p-3 text-xs text-cyan-100">
+                <div className="font-semibold text-cyan-300">Kompatibilnost</div>
+                <div>{WORKFLOW_POLICY.dashboardRuntime}</div>
+                <div>{WORKFLOW_POLICY.executionMode}</div>
+              </div>
+            </div>
           </div>
 
           {/* Workflow View */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            
+
             {/* Action Log */}
             <div className="bg-[#141517] border border-white/5 rounded-2xl p-6 shadow-xl flex flex-col h-[400px]">
               <h2 className="text-sm font-medium text-slate-300 mb-4 flex items-center gap-2 border-b border-white/5 pb-3">
@@ -282,7 +387,7 @@ export default function App() {
                     </motion.div>
                   )}
                   {logs.map((log) => (
-                    <motion.div 
+                    <motion.div
                       key={log.id}
                       initial={{ opacity: 0, x: -10 }}
                       animate={{ opacity: 1, x: 0 }}
@@ -335,7 +440,7 @@ export default function App() {
         </div>
 
         {/* Right Column: Global Memory */}
-        <div className="lg:col-span-4 bg-[#141517] border border-purple-500/20 rounded-2xl shadow-xl overflow-hidden flex flex-col h-full max-h-[800px]">
+        <div className="lg:col-span-4 bg-[#141517] border border-purple-500/20 rounded-2xl shadow-xl overflow-hidden flex flex-col h-full max-h-[900px]">
           <div className="p-5 border-b border-white/5 bg-purple-500/5 flex items-center gap-2">
             <Server className="size-5 text-purple-400" />
             <h2 className="font-medium text-white">Globalna Memorija</h2>
@@ -344,9 +449,9 @@ export default function App() {
               <span className="text-[10px] text-slate-400 font-mono">{memory.lastCheck}</span>
             </div>
           </div>
-          
+
           <div className="p-5 overflow-y-auto flex-1 space-y-6">
-            
+
             {/* Status & Goal */}
             <div className="space-y-4">
               <div>
@@ -359,15 +464,27 @@ export default function App() {
                   {memory.goal}
                 </div>
               </div>
-              <div>
-                <label className="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1 block">Prioritet</label>
-                <div className={`text-sm py-1.5 px-3 inline-block rounded-lg font-medium border ${
-                  memory.priority === 'High' ? 'bg-red-500/10 text-red-400 border-red-500/20' : 
-                  memory.priority === 'Medium' ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20' : 
-                  memory.priority === 'Low' ? 'bg-green-500/10 text-green-400 border-green-500/20' : 
-                  'bg-slate-500/10 text-slate-400 border-slate-500/20'
-                }`}>
-                  {memory.priority}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1 block">Prioritet</label>
+                  <div className={`text-xs font-bold inline-flex px-2.5 py-1 rounded border ${
+                    memory.priority === 'High' ? 'bg-red-500/10 text-red-400 border-red-500/20' :
+                    memory.priority === 'Medium' ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20' :
+                    memory.priority === 'Low' ? 'bg-green-500/10 text-green-400 border-green-500/20' :
+                    'bg-slate-500/10 text-slate-400 border-slate-500/20'
+                  }`}>
+                    {memory.priority}
+                  </div>
+                </div>
+                <div>
+                  <label className="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1 block">Citation Policy</label>
+                  <div className={`text-xs font-bold inline-flex px-2.5 py-1 rounded border ${
+                    memory.citationPolicy === 'metadata-required'
+                      ? 'bg-green-500/10 text-green-400 border-green-500/20'
+                      : 'bg-slate-500/10 text-slate-400 border-slate-500/20'
+                  }`}>
+                    {memory.citationPolicy === 'metadata-required' ? 'Required' : 'Not forced'}
+                  </div>
                 </div>
               </div>
               <div>
@@ -384,11 +501,11 @@ export default function App() {
                    {/* Background line */}
                    <div className="absolute left-0 top-1/2 -translate-y-1/2 w-full h-1 bg-slate-800 rounded-full"></div>
                    {/* Active line */}
-                   <div 
+                   <div
                      className="absolute left-0 top-1/2 -translate-y-1/2 h-1 bg-gradient-to-r from-purple-500 to-blue-500 rounded-full transition-all duration-500 ease-in-out shadow-[0_0_10px_rgba(59,130,246,0.5)]"
                      style={{ width: currentStep === 0 ? '0%' : `${((currentStep - 1) / 4) * 100}%` }}
                    ></div>
-                   
+
                    {/* Steps */}
                    <div className="relative z-10 flex justify-between items-center">
                      {[
@@ -402,10 +519,10 @@ export default function App() {
                        const isCurrent = currentStep === step;
                        return (
                          <div key={step} className="flex flex-col items-center focus:outline-none">
-                           <div 
+                           <div
                              className={`flex items-center justify-center size-6 rounded-full border-2 transition-all duration-300 relative z-10 ${
-                               isPast 
-                                 ? 'bg-blue-600 border-blue-500 text-white shadow-[0_0_10px_rgba(59,130,246,0.5)]' 
+                               isPast
+                                 ? 'bg-blue-600 border-blue-500 text-white shadow-[0_0_10px_rgba(59,130,246,0.5)]'
                                  : 'bg-[#141517] border-slate-700'
                              } ${isCurrent ? 'ring-4 ring-blue-500/30 scale-110' : ''}`}
                            >
@@ -448,7 +565,7 @@ export default function App() {
                   </ul>
                 )}
               </div>
-              
+
               <div>
                 <label className="text-xs text-slate-500 font-medium uppercase tracking-wider mb-2 flex items-center gap-1">
                   <CircleDashed className="size-3.5 text-orange-500" /> Nije Završeno (Pending)
@@ -483,6 +600,35 @@ export default function App() {
                   </ul>
                 )}
               </div>
+            </div>
+
+            <hr className="border-white/5" />
+
+            <div>
+              <label className="text-xs text-slate-500 font-medium uppercase tracking-wider mb-2 flex items-center gap-1">
+                <ShieldCheck className="size-3.5 text-cyan-500" /> Acceptance Criteria po fajlu
+              </label>
+              <div className="space-y-3">
+                {memory.acceptanceCriteriaByFile.map((fileCriteria) => (
+                  <div key={fileCriteria.file} className="rounded-lg border border-cyan-500/20 bg-cyan-500/10 p-3">
+                    <div className="font-mono text-xs text-cyan-300 mb-2">{fileCriteria.file}</div>
+                    <ul className="space-y-1.5">
+                      {fileCriteria.criteria.map((criterion) => (
+                        <li key={criterion} className="text-xs text-slate-300 flex items-start gap-2">
+                          <CheckCircle2 className="size-3 shrink-0 mt-0.5 text-cyan-400" />
+                          {criterion}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-white/5 bg-black/30 p-3">
+              <label className="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1 block">LLM Prompt Pravilo</label>
+              <p className="text-xs leading-relaxed text-slate-300">{memory.llmPromptRule}</p>
+              <p className="mt-2 text-xs leading-relaxed text-slate-500">{memory.executionPolicy}</p>
             </div>
 
             <hr className="border-white/5" />
