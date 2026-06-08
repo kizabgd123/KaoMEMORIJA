@@ -1,0 +1,27 @@
+{
+  "providers": {
+    "ollama": {
+      "baseUrl": "http://127.0.0.1:11434/v1",
+      "defaultModel": "ollama/llama3.3"
+    },
+    "gemini": {
+      "apiKey": "${GEMINI_API_KEY}"
+    },
+    "mistral": {
+      "apiKey": "${MISTRAL_API_KEY}"
+    },
+    "nvidia": {
+      "baseUrl": "https://integrate.api.nvidia.com/v1",
+      "apiKey": "${NVIDIA_API_KEY}"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": "gemini/gemini-3.1-flash-latest"
+    }
+  },
+  "fallbackChain": [
+    "mistral/mistral-large-latest",
+    "google/gemini-pro"
+  ]
+}
